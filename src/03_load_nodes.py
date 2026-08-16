@@ -10,7 +10,7 @@ import time
 
 URI = "bolt+s://db-a2703f17.databases.cognodb.com"
 USERNAME = "cognodb"
-PASSWORD = "dd030ff05a0acc853644b780d4f39df2"
+PASSWORD = ""
 
 BATCH_SIZE = 5_000
 
