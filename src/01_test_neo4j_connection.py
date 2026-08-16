@@ -6,7 +6,7 @@ USERNAME = "neo4j"
 
 # Put your Neo4j password here locally.
 # DO NOT share it with me or commit it to GitHub.
-PASSWORD = "Shubhu@7666"
+PASSWORD = ""
 
 
 def main():
