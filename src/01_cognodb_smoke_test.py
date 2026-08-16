@@ -1,9 +1,15 @@
 from neo4j import GraphDatabase
+import os
 
 
 URI = "bolt+s://db-a2703f17.databases.cognodb.com"
 USERNAME = "cognodb"
-PASSWORD = "dd030ff05a0acc853644b780d4f39df2"
+# Removed hard-coded password. Read from environment variable instead.
+PASSWORD = os.environ.get("COGNODB_PASSWORD")
+if not PASSWORD:
+    raise EnvironmentError(
+        "Environment variable COGNODB_PASSWORD is not set. Hard-coded passwords have been removed."
+    )
 
 
 def main():
