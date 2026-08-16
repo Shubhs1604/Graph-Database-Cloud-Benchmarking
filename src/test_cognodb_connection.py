@@ -10,7 +10,7 @@ USERNAME = "cognodb"
 
 # IMPORTANT:
 # Replace this with the password shown/provided by CognoDB.
-PASSWORD = "dd030ff05a0acc853644b780d4f39df2"
+PASSWORD = ""
 
 
 def test_connection():
