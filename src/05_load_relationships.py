@@ -1,18 +1,31 @@
-from neo4j import GraphDatabase
-from pathlib import Path
+import os
 import csv
 import time
+from pathlib import Path
+
+from dotenv import load_dotenv
+from neo4j import GraphDatabase
 
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
 
-URI = "bolt+s://db-a2703f17.databases.cognodb.com"
-USERNAME = "cognodb"
-PASSWORD = ""
+load_dotenv()
+
+URI = os.getenv("COGNODB_URI")
+USERNAME = os.getenv("COGNODB_USERNAME")
+PASSWORD = os.getenv("COGNODB_PASSWORD")
+DATABASE = os.getenv("COGNODB_DATABASE")
 
 BATCH_SIZE = 5_000
+
+
+if not URI or not USERNAME or not PASSWORD:
+    raise RuntimeError(
+        "Missing CognoDB environment variables. "
+        "Check your .env file."
+    )
 
 
 # ============================================================
@@ -43,7 +56,6 @@ def load_relationships(driver):
     print(RELATIONSHIPS_FILE)
 
     if not RELATIONSHIPS_FILE.exists():
-
         raise FileNotFoundError(
             f"File not found:\n{RELATIONSHIPS_FILE}"
         )
@@ -60,20 +72,63 @@ def load_relationships(driver):
 
         reader = csv.DictReader(file)
 
+        print(f"CSV columns: {reader.fieldnames}")
+
         batch = []
 
-        for row in reader:
+        with driver.session(
+            database=DATABASE
+        ) if DATABASE else driver.session() as session:
 
-            batch.append(
-                {
-                    "source": int(row["source_id"]),
-                    "target": int(row["target_id"])
-                }
-            )
+            for row in reader:
 
-            if len(batch) >= BATCH_SIZE:
+                batch.append(
+                    {
+                        "source": int(row["source_id"]),
+                        "target": int(row["target_id"])
+                    }
+                )
 
-                load_batch(driver, batch)
+                if len(batch) >= BATCH_SIZE:
+
+                    session.run(
+                        """
+                        UNWIND $relationships AS rel
+
+                        MATCH (source:User {id: rel.source})
+                        MATCH (target:User {id: rel.target})
+
+                        CREATE (source)-[:FRIEND]->(target)
+                        """,
+                        relationships=batch
+                    ).consume()
+
+                    total_loaded += len(batch)
+
+                    print(
+                        f"Relationships loaded: "
+                        f"{total_loaded:,}"
+                    )
+
+                    batch.clear()
+
+            # ------------------------------------------------
+            # Remaining rows
+            # ------------------------------------------------
+
+            if batch:
+
+                session.run(
+                    """
+                    UNWIND $relationships AS rel
+
+                    MATCH (source:User {id: rel.source})
+                    MATCH (target:User {id: rel.target})
+
+                    CREATE (source)-[:FRIEND]->(target)
+                    """,
+                    relationships=batch
+                ).consume()
 
                 total_loaded += len(batch)
 
@@ -81,20 +136,6 @@ def load_relationships(driver):
                     f"Relationships loaded: "
                     f"{total_loaded:,}"
                 )
-
-                batch.clear()
-
-        # Remaining rows
-        if batch:
-
-            load_batch(driver, batch)
-
-            total_loaded += len(batch)
-
-            print(
-                f"Relationships loaded: "
-                f"{total_loaded:,}"
-            )
 
     elapsed = time.perf_counter() - start_time
 
@@ -119,29 +160,6 @@ def load_relationships(driver):
             f"{total_loaded / elapsed:,.0f} "
             f"relationships/sec"
         )
-
-
-# ============================================================
-# LOAD ONE BATCH
-# ============================================================
-
-def load_batch(driver, batch):
-
-    query = """
-    UNWIND $relationships AS rel
-
-    MATCH (source:User {id: rel.source})
-    MATCH (target:User {id: rel.target})
-
-    CREATE (source)-[:FRIEND]->(target)
-    """
-
-    with driver.session() as session:
-
-        session.run(
-            query,
-            relationships=batch
-        ).consume()
 
 
 # ============================================================

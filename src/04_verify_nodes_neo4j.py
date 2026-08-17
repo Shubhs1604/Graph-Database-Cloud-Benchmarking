@@ -1,10 +1,31 @@
+import os
+
+from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
 
-URI = "neo4j://127.0.0.1:7687"
-USERNAME = "neo4j"
-PASSWORD = ""
+# ============================================================
+# LOAD ENVIRONMENT VARIABLES
+# ============================================================
 
+load_dotenv()
+
+URI = os.getenv("NEO4J_URI")
+USERNAME = os.getenv("NEO4J_USERNAME")
+PASSWORD = os.getenv("NEO4J_PASSWORD")
+DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
+
+
+if not URI or not USERNAME or not PASSWORD:
+    raise RuntimeError(
+        "Missing Neo4j environment variables. "
+        "Check your .env file."
+    )
+
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
 
@@ -18,9 +39,14 @@ def main():
     )
 
     try:
+
         driver.verify_connectivity()
 
-        with driver.session(database="neo4j") as session:
+        with driver.session(database=DATABASE) as session:
+
+            # ------------------------------------------------
+            # Total nodes
+            # ------------------------------------------------
 
             result = session.run("""
                 MATCH (u:User)
@@ -28,6 +54,10 @@ def main():
             """).single()
 
             total_nodes = result["total_nodes"]
+
+            # ------------------------------------------------
+            # Nodes with ID
+            # ------------------------------------------------
 
             result = session.run("""
                 MATCH (u:User)
@@ -37,6 +67,10 @@ def main():
 
             nodes_with_id = result["nodes_with_id"]
 
+            # ------------------------------------------------
+            # Unique IDs
+            # ------------------------------------------------
+
             result = session.run("""
                 MATCH (u:User)
                 WHERE u.id IS NOT NULL
@@ -45,12 +79,20 @@ def main():
 
             unique_ids = result["unique_ids"]
 
+            # ------------------------------------------------
+            # Relationships
+            # ------------------------------------------------
+
             result = session.run("""
                 MATCH ()-[r]->()
                 RETURN count(r) AS relationships
             """).single()
 
             relationships = result["relationships"]
+
+            # ------------------------------------------------
+            # Results
+            # ------------------------------------------------
 
             print(f"\nTotal User nodes       : {total_nodes:,}")
             print(f"Nodes with ID          : {nodes_with_id:,}")
@@ -72,6 +114,7 @@ def main():
             print("=" * 60)
 
     finally:
+
         driver.close()
 
 

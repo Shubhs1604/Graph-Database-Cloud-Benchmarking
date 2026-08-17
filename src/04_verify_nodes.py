@@ -1,12 +1,37 @@
+import os
+
+from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
 
-URI = "bolt+s://db-a2703f17.databases.cognodb.com"
-USERNAME = "cognodb"
-PASSWORD = ""
+# ============================================================
+# LOAD ENVIRONMENT VARIABLES
+# ============================================================
 
+load_dotenv()
+
+URI = os.getenv("COGNODB_URI")
+USERNAME = os.getenv("COGNODB_USERNAME")
+PASSWORD = os.getenv("COGNODB_PASSWORD")
+DATABASE = os.getenv("COGNODB_DATABASE")
+
+
+if not URI or not USERNAME or not PASSWORD:
+    raise RuntimeError(
+        "Missing CognoDB environment variables. "
+        "Check your .env file."
+    )
+
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
+
+    print("=" * 60)
+    print("WEXA AI - COGNODB NODE VERIFICATION")
+    print("=" * 60)
 
     driver = GraphDatabase.driver(
         URI,
@@ -17,11 +42,15 @@ def main():
 
         driver.verify_connectivity()
 
-        print("=" * 60)
-        print("WEXA AI - COGNODB NODE VERIFICATION")
-        print("=" * 60)
+        print("\nCognoDB connection: SUCCESS")
 
-        with driver.session() as session:
+        # Use database only if specified
+        if DATABASE:
+            session = driver.session(database=DATABASE)
+        else:
+            session = driver.session()
+
+        with session:
 
             # ------------------------------------------------
             # Count total User nodes
@@ -42,7 +71,7 @@ def main():
             )
 
             # ------------------------------------------------
-            # Count nodes with properties
+            # Count nodes with IDs
             # ------------------------------------------------
 
             result = session.run(
@@ -102,6 +131,10 @@ def main():
                 f"{duplicate_ids:,}"
             )
 
+        # ----------------------------------------------------
+        # Validation
+        # ----------------------------------------------------
+
         print("\n" + "=" * 60)
 
         if (
@@ -111,11 +144,11 @@ def main():
             and duplicate_ids == 0
         ):
 
-            print("NODE VERIFICATION PASSED ✅")
+            print("NODE VERIFICATION PASSED")
 
         else:
 
-            print("NODE VERIFICATION NEEDS REVIEW ⚠️")
+            print("NODE VERIFICATION NEEDS REVIEW")
 
         print("=" * 60)
 

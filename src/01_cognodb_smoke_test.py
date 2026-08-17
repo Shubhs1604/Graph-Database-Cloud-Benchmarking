@@ -1,16 +1,15 @@
-from neo4j import GraphDatabase
 import os
+from dotenv import load_dotenv
+from neo4j import GraphDatabase
 
+load_dotenv()
 
-URI = "bolt+s://db-a2703f17.databases.cognodb.com"
-USERNAME = "cognodb"
-# Removed hard-coded password. Read from environment variable instead.
-PASSWORD = os.environ.get("COGNODB_PASSWORD")
-if not PASSWORD:
-    raise EnvironmentError(
-        "Environment variable COGNODB_PASSWORD is not set. Hard-coded passwords have been removed."
-    )
+URI = os.getenv("COGNODB_URI")
+USERNAME = os.getenv("COGNODB_USERNAME")
+PASSWORD = os.getenv("COGNODB_PASSWORD")
 
+if not URI or not USERNAME or not PASSWORD:
+    raise RuntimeError("CognoDB environment variables are missing")
 
 def main():
 

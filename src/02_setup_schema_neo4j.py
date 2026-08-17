@@ -1,9 +1,22 @@
+import os
+
+from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
 
-URI = "neo4j://127.0.0.1:7687"
-USERNAME = "neo4j"
-PASSWORD = ""
+load_dotenv()
+
+URI = os.getenv("NEO4J_URI")
+USERNAME = os.getenv("NEO4J_USERNAME")
+PASSWORD = os.getenv("NEO4J_PASSWORD")
+DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
+
+
+if not URI or not USERNAME or not PASSWORD:
+    raise RuntimeError(
+        "Missing Neo4j environment variables. "
+        "Check your .env file."
+    )
 
 
 def main():
@@ -20,7 +33,7 @@ def main():
     try:
         driver.verify_connectivity()
 
-        with driver.session(database="neo4j") as session:
+        with driver.session(database=DATABASE) as session:
 
             print("\nCreating User ID index...")
 

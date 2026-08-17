@@ -1,12 +1,28 @@
+import os
+
+from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
 
-URI = "bolt+s://db-a2703f17.databases.cognodb.com"
-USERNAME = "cognodb"
-PASSWORD = ""
+load_dotenv()
+
+URI = os.getenv("COGNODB_URI")
+USERNAME = os.getenv("COGNODB_USERNAME")
+PASSWORD = os.getenv("COGNODB_PASSWORD")
+
+
+if not URI or not USERNAME or not PASSWORD:
+    raise RuntimeError(
+        "Missing CognoDB environment variables. "
+        "Check your .env file."
+    )
 
 
 def main():
+
+    print("=" * 60)
+    print("WEXA AI - COGNODB SCHEMA SETUP")
+    print("=" * 60)
 
     driver = GraphDatabase.driver(
         URI,
@@ -18,7 +34,7 @@ def main():
 
         with driver.session() as session:
 
-            print("Creating User ID index...")
+            print("\nCreating User ID index...")
 
             session.run(
                 """
@@ -26,7 +42,7 @@ def main():
                 FOR (u:User)
                 ON (u.id)
                 """
-            )
+            ).consume()
 
             print("Index creation command completed.")
 
@@ -47,7 +63,9 @@ def main():
                     record.get("type")
                 )
 
-        print("\nSchema setup complete.")
+        print("\n" + "=" * 60)
+        print("COGNODB SCHEMA SETUP COMPLETE")
+        print("=" * 60)
 
     finally:
         driver.close()

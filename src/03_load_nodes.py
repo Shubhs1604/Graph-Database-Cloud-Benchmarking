@@ -1,5 +1,7 @@
 from neo4j import GraphDatabase
+from dotenv import load_dotenv
 from pathlib import Path
+import os
 import csv
 import time
 
@@ -8,11 +10,20 @@ import time
 # CONFIGURATION
 # ============================================================
 
-URI = "bolt+s://db-a2703f17.databases.cognodb.com"
-USERNAME = "cognodb"
-PASSWORD = ""
+load_dotenv()
+
+URI = os.getenv("COGNODB_URI")
+USERNAME = os.getenv("COGNODB_USERNAME")
+PASSWORD = os.getenv("COGNODB_PASSWORD")
 
 BATCH_SIZE = 5_000
+
+
+if not URI or not USERNAME or not PASSWORD:
+    raise RuntimeError(
+        "Missing CognoDB environment variables. "
+        "Check your .env file."
+    )
 
 
 # ============================================================
@@ -39,11 +50,10 @@ def load_nodes(driver):
     print("WEXA AI - COGNODB NODE LOADER")
     print("=" * 60)
 
-    print(f"\nInput file:")
+    print("\nInput file:")
     print(NODES_FILE)
 
     if not NODES_FILE.exists():
-
         raise FileNotFoundError(
             f"File not found:\n{NODES_FILE}"
         )
@@ -59,7 +69,6 @@ def load_nodes(driver):
     ) as file:
 
         reader = csv.DictReader(file)
-
         batch = []
 
         for row in reader:
@@ -114,7 +123,6 @@ def load_nodes(driver):
     )
 
     if elapsed > 0:
-
         print(
             f"Throughput         : "
             f"{total_loaded / elapsed:,.0f} nodes/sec"

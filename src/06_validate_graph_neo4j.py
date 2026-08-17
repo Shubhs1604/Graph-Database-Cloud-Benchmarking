@@ -1,10 +1,31 @@
+import os
+
+from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
 
-URI = "neo4j://127.0.0.1:7687"
-USERNAME = "neo4j"
-PASSWORD = ""
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
+load_dotenv()
+
+URI = os.getenv("NEO4J_URI")
+USERNAME = os.getenv("NEO4J_USERNAME")
+PASSWORD = os.getenv("NEO4J_PASSWORD")
+DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
+
+
+if not URI or not USERNAME or not PASSWORD:
+    raise RuntimeError(
+        "Missing Neo4j environment variables. "
+        "Check your .env file."
+    )
+
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
 
@@ -21,9 +42,14 @@ def main():
 
         driver.verify_connectivity()
 
-        with driver.session(database="neo4j") as session:
+        print("\nNeo4j connection: SUCCESS")
 
+        with driver.session(database=DATABASE) as session:
+
+            # ------------------------------------------------
             # Total nodes
+            # ------------------------------------------------
+
             result = session.run("""
                 MATCH (u:User)
                 RETURN count(u) AS total_nodes
@@ -31,7 +57,10 @@ def main():
 
             total_nodes = result["total_nodes"]
 
+            # ------------------------------------------------
             # Total relationships
+            # ------------------------------------------------
+
             result = session.run("""
                 MATCH ()-[r:FRIEND]->()
                 RETURN count(r) AS total_relationships
@@ -39,7 +68,10 @@ def main():
 
             total_relationships = result["total_relationships"]
 
+            # ------------------------------------------------
             # Self-loops
+            # ------------------------------------------------
+
             result = session.run("""
                 MATCH (a:User)-[r:FRIEND]->(b:User)
                 WHERE a.id = b.id
@@ -48,33 +80,71 @@ def main():
 
             self_loops = result["self_loops"]
 
+            # ------------------------------------------------
             # Duplicate relationships
+            # ------------------------------------------------
+
             result = session.run("""
                 MATCH (a:User)-[:FRIEND]->(b:User)
-                WITH a.id AS source, b.id AS target, count(*) AS cnt
+                WITH a.id AS source,
+                     b.id AS target,
+                     count(*) AS cnt
                 WHERE cnt > 1
                 RETURN sum(cnt - 1) AS duplicates
             """).single()
 
             duplicates = result["duplicates"] or 0
 
-            # Relationships with invalid endpoints
+            # ------------------------------------------------
+            # Invalid relationship endpoints
+            # ------------------------------------------------
+
             result = session.run("""
                 MATCH (a)-[r:FRIEND]->(b)
                 WHERE NOT a:User OR NOT b:User
                 RETURN count(r) AS invalid_relationships
             """).single()
 
-            invalid_relationships = result["invalid_relationships"]
+            invalid_relationships = (
+                result["invalid_relationships"]
+            )
+
+            # ------------------------------------------------
+            # Print results
+            # ------------------------------------------------
 
             print()
-            print(f"Total nodes              : {total_nodes:,}")
-            print(f"Total relationships      : {total_relationships:,}")
-            print(f"Self-loop relationships  : {self_loops:,}")
-            print(f"Duplicate relationships  : {duplicates:,}")
-            print(f"Invalid relationships    : {invalid_relationships:,}")
+
+            print(
+                f"Total nodes              : "
+                f"{total_nodes:,}"
+            )
+
+            print(
+                f"Total relationships      : "
+                f"{total_relationships:,}"
+            )
+
+            print(
+                f"Self-loop relationships  : "
+                f"{self_loops:,}"
+            )
+
+            print(
+                f"Duplicate relationships  : "
+                f"{duplicates:,}"
+            )
+
+            print(
+                f"Invalid relationships    : "
+                f"{invalid_relationships:,}"
+            )
 
             print("\n" + "=" * 60)
+
+            # ------------------------------------------------
+            # Validation
+            # ------------------------------------------------
 
             if (
                 total_nodes == 397769
@@ -83,15 +153,19 @@ def main():
                 and duplicates == 0
                 and invalid_relationships == 0
             ):
+
                 print("VALIDATION RESULT")
                 print("NEO4J GRAPH VALIDATION PASSED")
+
             else:
+
                 print("VALIDATION RESULT")
                 print("NEO4J GRAPH VALIDATION FAILED")
 
             print("=" * 60)
 
     finally:
+
         driver.close()
 
 

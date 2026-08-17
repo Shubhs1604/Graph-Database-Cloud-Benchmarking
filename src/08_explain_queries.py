@@ -1,10 +1,64 @@
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
 
-URI = "bolt+s://db-a2703f17.databases.cognodb.com"
-USERNAME = "cognodb"
-PASSWORD = ""
+# ============================================================
+# PROJECT ROOT
+# ============================================================
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+# ============================================================
+# LOAD ENVIRONMENT VARIABLES
+# ============================================================
+
+load_dotenv(PROJECT_ROOT / ".env")
+
+
+# ============================================================
+# COGNODB CONFIGURATION
+# ============================================================
+
+URI = os.getenv("COGNODB_URI")
+USERNAME = os.getenv("COGNODB_USERNAME")
+PASSWORD = os.getenv("COGNODB_PASSWORD")
+DATABASE = os.getenv("COGNODB_DATABASE")
+
+
+# ============================================================
+# VALIDATE ENVIRONMENT VARIABLES
+# ============================================================
+
+if not URI:
+    raise RuntimeError(
+        "Missing COGNODB_URI in .env file."
+    )
+
+if not USERNAME:
+    raise RuntimeError(
+        "Missing COGNODB_USERNAME in .env file."
+    )
+
+if not PASSWORD:
+    raise RuntimeError(
+        "Missing COGNODB_PASSWORD in .env file."
+    )
+
+
+# ============================================================
+# BENCHMARK NODE
+# ============================================================
+
+BENCHMARK_NODE = 1891
+
+
+# ============================================================
+# QUERIES
+# ============================================================
 
 QUERIES = {
 
@@ -42,45 +96,137 @@ QUERIES = {
 }
 
 
+# ============================================================
+# MAIN
+# ============================================================
+
 def main():
+
+    print("=" * 70)
+    print("WEXA AI - COGNODB QUERY PLAN ANALYSIS")
+    print("=" * 70)
+
+    print(
+        f"\nBenchmark node: "
+        f"{BENCHMARK_NODE}"
+    )
+
+    print(
+        f"Database: "
+        f"{DATABASE}"
+    )
+
+    # ========================================================
+    # CREATE DRIVER
+    # ========================================================
 
     driver = GraphDatabase.driver(
         URI,
-        auth=(USERNAME, PASSWORD)
+        auth=(
+            USERNAME,
+            PASSWORD
+        )
     )
 
     try:
 
+        # ====================================================
+        # VERIFY CONNECTION
+        # ====================================================
+
         driver.verify_connectivity()
 
-        print("=" * 70)
-        print("WEXA AI - COGNODB QUERY PLAN ANALYSIS")
-        print("=" * 70)
+        print(
+            "\nCognoDB connection: OK"
+        )
 
-        with driver.session() as session:
+        # ====================================================
+        # CREATE SESSION
+        # ====================================================
+
+        session_kwargs = {}
+
+        if DATABASE:
+            session_kwargs["database"] = DATABASE
+
+        with driver.session(**session_kwargs) as session:
+
+            # ================================================
+            # RUN EXPLAIN FOR EACH QUERY
+            # ================================================
 
             for name, query in QUERIES.items():
 
                 print("\n")
                 print("=" * 70)
-                print(f"QUERY: {name}")
+                print(
+                    f"QUERY: {name}"
+                )
                 print("=" * 70)
 
-                explain_query = "EXPLAIN " + query
+                print(
+                    "\nCypher:"
+                )
+
+                print(
+                    query.strip()
+                )
+
+                print(
+                    "\nQuery plan:"
+                )
+
+                explain_query = (
+                    "EXPLAIN "
+                    + query
+                )
 
                 result = session.run(
                     explain_query,
-                    node_id=1891
+                    node_id=BENCHMARK_NODE
                 )
 
                 summary = result.consume().plan
 
-                print(summary)
+                print(
+                    summary
+                )
+
+        # ====================================================
+        # COMPLETE
+        # ====================================================
+
+        print("\n")
+        print("=" * 70)
+        print(
+            "QUERY PLAN ANALYSIS COMPLETE"
+        )
+        print("=" * 70)
+
+    except Exception as e:
+
+        print("\n")
+        print("=" * 70)
+        print(
+            "COGNODB QUERY PLAN ANALYSIS FAILED"
+        )
+        print("=" * 70)
+
+        print(
+            f"\nError:\n{e}"
+        )
+
+        raise
 
     finally:
 
         driver.close()
 
 
+# ============================================================
+# ENTRY POINT
+# ============================================================
+
 if __name__ == "__main__":
+
     main()

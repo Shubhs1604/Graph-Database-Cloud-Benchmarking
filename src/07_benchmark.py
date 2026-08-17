@@ -1,17 +1,23 @@
-from neo4j import GraphDatabase
-from pathlib import Path
+import os
 import statistics
 import time
 import csv
+
+from pathlib import Path
+from dotenv import load_dotenv
+from neo4j import GraphDatabase
 
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
 
-URI = "bolt+s://db-a2703f17.databases.cognodb.com"
-USERNAME = "cognodb"
-PASSWORD = ""
+load_dotenv()
+
+URI = os.getenv("COGNODB_URI")
+USERNAME = os.getenv("COGNODB_USERNAME")
+PASSWORD = os.getenv("COGNODB_PASSWORD")
+DATABASE = os.getenv("COGNODB_DATABASE")
 
 RUNS = 20
 
@@ -23,6 +29,13 @@ RESULTS_DIR.mkdir(
     parents=True,
     exist_ok=True
 )
+
+
+if not URI or not USERNAME or not PASSWORD:
+    raise RuntimeError(
+        "Missing CognoDB environment variables. "
+        "Check your .env file."
+    )
 
 
 # ============================================================
@@ -79,7 +92,12 @@ def get_benchmark_node(driver):
         RETURN u.id AS id
     """
 
-    with driver.session() as session:
+    session_kwargs = {}
+
+    if DATABASE:
+        session_kwargs["database"] = DATABASE
+
+    with driver.session(**session_kwargs) as session:
 
         record = session.run(query).single()
 
@@ -104,7 +122,12 @@ def run_query(
 
     start = time.perf_counter()
 
-    with driver.session() as session:
+    session_kwargs = {}
+
+    if DATABASE:
+        session_kwargs["database"] = DATABASE
+
+    with driver.session(**session_kwargs) as session:
 
         result = session.run(
             query,
@@ -135,7 +158,6 @@ def percentile(
     values = sorted(values)
 
     if not values:
-
         return None
 
     index = (
@@ -350,6 +372,7 @@ def main():
             )
 
         print("\n")
+
         print(
             f"Results saved to:\n"
             f"{output_file}"

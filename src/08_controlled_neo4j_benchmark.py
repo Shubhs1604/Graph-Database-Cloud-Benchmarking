@@ -1,34 +1,73 @@
+import os
 import csv
 import statistics
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
 
 # ============================================================
-# CONFIGURATION
+# PROJECT ROOT
 # ============================================================
 
-URI = "neo4j://127.0.0.1:7687"
-USERNAME = "neo4j"
-PASSWORD = ""
-DATABASE = "neo4j"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+# ============================================================
+# LOAD ENVIRONMENT VARIABLES
+# ============================================================
+
+load_dotenv(PROJECT_ROOT / ".env")
+
+
+# ============================================================
+# NEO4J CONFIGURATION
+# ============================================================
+
+URI = os.getenv("NEO4J_URI")
+USERNAME = os.getenv("NEO4J_USERNAME")
+PASSWORD = os.getenv("NEO4J_PASSWORD")
+DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
+
+
+if not URI:
+    raise RuntimeError(
+        "Missing NEO4J_URI in .env file."
+    )
+
+if not USERNAME:
+    raise RuntimeError(
+        "Missing NEO4J_USERNAME in .env file."
+    )
+
+if not PASSWORD:
+    raise RuntimeError(
+        "Missing NEO4J_PASSWORD in .env file."
+    )
+
+
+# ============================================================
+# BENCHMARK CONFIGURATION
+# ============================================================
 
 BENCHMARK_NODE = 1891
 
 WARMUP_RUNS = 10
+
 BENCHMARK_RUNS = 100
 
-PROJECT_ROOT = Path(
-    r"C:\Users\Lenovo\Documents\wexa-cognodb-benchmark"
-)
+
+# ============================================================
+# RESULTS
+# ============================================================
 
 RESULTS_DIR = PROJECT_ROOT / "results"
 
 OUTPUT_FILE = (
-    RESULTS_DIR /
-    "neo4j_controlled_benchmark.csv"
+    RESULTS_DIR
+    / "neo4j_controlled_benchmark.csv"
 )
 
 
@@ -41,6 +80,7 @@ QUERIES = {
     "1_hop": """
         MATCH (u:User {id: $node_id})
               -[:FRIEND]->(friend:User)
+
         RETURN friend.id AS node_id
     """,
 
@@ -48,6 +88,7 @@ QUERIES = {
         MATCH (u:User {id: $node_id})
               -[:FRIEND]->()
               -[:FRIEND]->(friend:User)
+
         RETURN DISTINCT friend.id AS node_id
     """,
 
@@ -56,6 +97,7 @@ QUERIES = {
               -[:FRIEND]->()
               -[:FRIEND]->()
               -[:FRIEND]->(friend:User)
+
         RETURN DISTINCT friend.id AS node_id
     """
 }
@@ -69,7 +111,13 @@ def percentile(values, p):
 
     values = sorted(values)
 
-    index = (p / 100) * (len(values) - 1)
+    if not values:
+        return 0.0
+
+    index = (
+        (p / 100)
+        * (len(values) - 1)
+    )
 
     lower = int(index)
 
@@ -88,7 +136,7 @@ def percentile(values, p):
 
 
 # ============================================================
-# RUN QUERY
+# RUN ONE QUERY
 # ============================================================
 
 def run_query(session, query):
@@ -100,6 +148,7 @@ def run_query(session, query):
         node_id=BENCHMARK_NODE
     )
 
+    # Consume the complete result.
     records = list(result)
 
     elapsed = (
@@ -110,7 +159,7 @@ def run_query(session, query):
 
 
 # ============================================================
-# BENCHMARK
+# BENCHMARK ONE WORKLOAD
 # ============================================================
 
 def benchmark_workload(
@@ -142,9 +191,12 @@ def benchmark_workload(
         f"{BENCHMARK_RUNS}"
     )
 
-    # --------------------------------------------------------
-    # Warm-up
-    # --------------------------------------------------------
+
+    # ========================================================
+    # WARM-UP
+    # ========================================================
+
+    print("\nRunning warm-up...")
 
     for _ in range(WARMUP_RUNS):
 
@@ -153,12 +205,17 @@ def benchmark_workload(
             query
         )
 
-    # --------------------------------------------------------
-    # Benchmark
-    # --------------------------------------------------------
+
+    # ========================================================
+    # BENCHMARK
+    # ========================================================
+
+    print("\nRunning benchmark...")
 
     latencies = []
+
     row_counts = []
+
 
     for i in range(BENCHMARK_RUNS):
 
@@ -175,12 +232,18 @@ def benchmark_workload(
             rows
         )
 
+
         if (i + 1) % 10 == 0:
 
             print(
                 f"Completed "
                 f"{i + 1}/{BENCHMARK_RUNS}"
             )
+
+
+    # ========================================================
+    # STATISTICS
+    # ========================================================
 
     p50 = percentile(
         latencies,
@@ -199,6 +262,11 @@ def benchmark_workload(
     median_rows = statistics.median(
         row_counts
     )
+
+
+    # ========================================================
+    # PRINT RESULTS
+    # ========================================================
 
     print("\nResults:")
 
@@ -222,12 +290,19 @@ def benchmark_workload(
         f"{median_rows}"
     )
 
+
     return {
+
         "workload": workload,
+
         "benchmark_node": BENCHMARK_NODE,
+
         "p50_ms": p50,
+
         "p95_ms": p95,
+
         "mean_ms": mean,
+
         "median_rows": median_rows
     }
 
@@ -246,6 +321,7 @@ def main():
 
     print("=" * 60)
 
+
     print(
         f"\nBenchmark node: "
         f"{BENCHMARK_NODE}"
@@ -261,7 +337,13 @@ def main():
         f"{WARMUP_RUNS}"
     )
 
+
+    # ========================================================
+    # CONNECTION
+    # ========================================================
+
     print("\nConnecting to Neo4j...")
+
 
     driver = GraphDatabase.driver(
         URI,
@@ -271,6 +353,7 @@ def main():
         )
     )
 
+
     try:
 
         driver.verify_connectivity()
@@ -279,25 +362,40 @@ def main():
             "Neo4j connection: OK"
         )
 
-        # ----------------------------------------------------
-        # Verify benchmark node
-        # ----------------------------------------------------
+
+        # ====================================================
+        # OPEN SESSION
+        # ====================================================
 
         with driver.session(
             database=DATABASE
         ) as session:
 
+
+            # ================================================
+            # VERIFY BENCHMARK NODE
+            # ================================================
+
+            print(
+                "\nChecking benchmark node..."
+            )
+
+
             result = session.run(
                 """
                 MATCH (u:User {id: $node_id})
-                RETURN u.id AS id,
-                       u.gender AS gender,
-                       u.age AS age
+
+                RETURN
+                    u.id AS id,
+                    u.gender AS gender,
+                    u.age AS age
                 """,
                 node_id=BENCHMARK_NODE
             )
 
+
             record = result.single()
+
 
             if record is None:
 
@@ -307,27 +405,33 @@ def main():
                     f"does not exist."
                 )
 
+
             print(
                 "\nBenchmark node found:"
             )
 
             print(
-                f"ID     : {record['id']}"
+                f"ID     : "
+                f"{record['id']}"
             )
 
             print(
-                f"Gender : {record['gender']}"
+                f"Gender : "
+                f"{record['gender']}"
             )
 
             print(
-                f"Age    : {record['age']}"
+                f"Age    : "
+                f"{record['age']}"
             )
 
-            # ------------------------------------------------
-            # Run workloads
-            # ------------------------------------------------
+
+            # ================================================
+            # RUN WORKLOADS
+            # ================================================
 
             results = []
+
 
             for workload, query in QUERIES.items():
 
@@ -341,14 +445,20 @@ def main():
                     result
                 )
 
-        # ----------------------------------------------------
-        # Save CSV
-        # ----------------------------------------------------
+
+        # ====================================================
+        # CREATE RESULTS DIRECTORY
+        # ====================================================
 
         RESULTS_DIR.mkdir(
             parents=True,
             exist_ok=True
         )
+
+
+        # ====================================================
+        # SAVE CSV
+        # ====================================================
 
         with open(
             OUTPUT_FILE,
@@ -369,23 +479,32 @@ def main():
                 ]
             )
 
+
             writer.writeheader()
+
 
             writer.writerows(
                 results
             )
 
-        # ----------------------------------------------------
-        # Summary
-        # ----------------------------------------------------
 
-        print("\n" + "=" * 75)
+        # ====================================================
+        # FINAL SUMMARY
+        # ====================================================
+
+        print(
+            "\n"
+            + "=" * 75
+        )
 
         print(
             "CONTROLLED NEO4J BENCHMARK SUMMARY"
         )
 
-        print("=" * 75)
+        print(
+            "=" * 75
+        )
+
 
         print(
             f"{'Workload':<15}"
@@ -395,7 +514,11 @@ def main():
             f"{'Mean(ms)':>14}"
         )
 
-        print("-" * 67)
+
+        print(
+            "-" * 67
+        )
+
 
         for result in results:
 
@@ -407,22 +530,61 @@ def main():
                 f"{result['mean_ms']:>14.3f}"
             )
 
-        print("\nResults saved to:")
 
-        print(OUTPUT_FILE)
+        print(
+            "\nResults saved to:"
+        )
 
-        print("\n" + "=" * 60)
+        print(
+            OUTPUT_FILE
+        )
+
+
+        print(
+            "\n"
+            + "=" * 60
+        )
 
         print(
             "CONTROLLED NEO4J BENCHMARK COMPLETE"
         )
 
-        print("=" * 60)
+        print(
+            "=" * 60
+        )
+
+
+    except Exception as e:
+
+        print(
+            "\n"
+            + "=" * 60
+        )
+
+        print(
+            "NEO4J BENCHMARK FAILED"
+        )
+
+        print(
+            "=" * 60
+        )
+
+        print(
+            f"\nError:\n{e}"
+        )
+
+        raise
+
 
     finally:
 
         driver.close()
 
 
+# ============================================================
+# ENTRY POINT
+# ============================================================
+
 if __name__ == "__main__":
+
     main()

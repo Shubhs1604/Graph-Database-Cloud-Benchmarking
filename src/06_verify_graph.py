@@ -1,10 +1,31 @@
+import os
+
+from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
 
-URI = "bolt+s://db-a2703f17.databases.cognodb.com"
-USERNAME = "cognodb"
-PASSWORD = ""
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
+load_dotenv()
+
+URI = os.getenv("COGNODB_URI")
+USERNAME = os.getenv("COGNODB_USERNAME")
+PASSWORD = os.getenv("COGNODB_PASSWORD")
+DATABASE = os.getenv("COGNODB_DATABASE")
+
+
+if not URI or not USERNAME or not PASSWORD:
+    raise RuntimeError(
+        "Missing CognoDB environment variables. "
+        "Check your .env file."
+    )
+
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
 
@@ -21,7 +42,12 @@ def main():
         print("WEXA AI - FINAL GRAPH VALIDATION")
         print("=" * 60)
 
-        with driver.session() as session:
+        session_kwargs = {}
+
+        if DATABASE:
+            session_kwargs["database"] = DATABASE
+
+        with driver.session(**session_kwargs) as session:
 
             # ==================================================
             # 1. TOTAL NODES
@@ -100,7 +126,7 @@ def main():
             )
 
             # ==================================================
-            # 5. RELATIONSHIPS WITH MISSING SOURCE/TARGET
+            # 5. RELATIONSHIPS WITH MISSING SOURCE/TARGET ID
             # ==================================================
 
             result = session.run(
@@ -134,11 +160,11 @@ def main():
             and invalid_relationships == 0
         ):
 
-            print("\n✅ GRAPH VALIDATION PASSED")
+            print("\nGRAPH VALIDATION PASSED")
 
         else:
 
-            print("\n⚠️ GRAPH VALIDATION NEEDS REVIEW")
+            print("\nGRAPH VALIDATION NEEDS REVIEW")
 
         print("=" * 60)
 

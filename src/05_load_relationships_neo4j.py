@@ -1,19 +1,50 @@
 import csv
+import os
 import time
+from pathlib import Path
+
+from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
 
-URI = "neo4j://127.0.0.1:7687"
-USERNAME = "neo4j"
-PASSWORD = ""
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+load_dotenv()
+
+URI = os.getenv("NEO4J_URI")
+USERNAME = os.getenv("NEO4J_USERNAME")
+PASSWORD = os.getenv("NEO4J_PASSWORD")
+DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
+
+BATCH_SIZE = 5_000
+
+
+if not URI or not USERNAME or not PASSWORD:
+    raise RuntimeError(
+        "Missing Neo4j environment variables. "
+        "Check your .env file."
+    )
+
+
+# ============================================================
+# FILE PATH
+# ============================================================
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 RELATIONSHIPS_FILE = (
-    r"C:\Users\Lenovo\Documents\wexa-cognodb-benchmark"
-    r"\data\benchmark\relationships.csv"
+    PROJECT_ROOT
+    / "data"
+    / "benchmark"
+    / "relationships.csv"
 )
 
-BATCH_SIZE = 5000
 
+# ============================================================
+# LOAD RELATIONSHIPS
+# ============================================================
 
 def load_relationships(driver):
 
@@ -24,7 +55,12 @@ def load_relationships(driver):
     print("\nInput file:")
     print(RELATIONSHIPS_FILE)
 
-    start_time = time.time()
+    if not RELATIONSHIPS_FILE.exists():
+        raise FileNotFoundError(
+            f"File not found:\n{RELATIONSHIPS_FILE}"
+        )
+
+    start_time = time.perf_counter()
     total_loaded = 0
 
     with open(
@@ -40,7 +76,7 @@ def load_relationships(driver):
 
         batch = []
 
-        with driver.session(database="neo4j") as session:
+        with driver.session(database=DATABASE) as session:
 
             for row in reader:
 
@@ -72,6 +108,10 @@ def load_relationships(driver):
 
                     batch.clear()
 
+            # ------------------------------------------------
+            # Load remaining rows
+            # ------------------------------------------------
+
             if batch:
 
                 session.run(
@@ -93,7 +133,7 @@ def load_relationships(driver):
                     f"{total_loaded:,}"
                 )
 
-    elapsed = time.time() - start_time
+    elapsed = time.perf_counter() - start_time
 
     print("\n" + "=" * 60)
     print("RELATIONSHIP LOAD COMPLETE")
@@ -117,6 +157,10 @@ def load_relationships(driver):
             f"relationships/sec"
         )
 
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
 

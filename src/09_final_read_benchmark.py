@@ -1,52 +1,47 @@
+import os
+
+from dotenv import load_dotenv
 from neo4j import GraphDatabase
-from pathlib import Path
-import random
-import statistics
-import time
-import csv
+
+
+# ============================================================
+# LOAD ENVIRONMENT VARIABLES
+# ============================================================
+
+load_dotenv()
 
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
 
-URI = "bolt+s://db-a2703f17.databases.cognodb.com"
-USERNAME = "cognodb"
-PASSWORD = ""
+URI = os.getenv("COGNODB_URI")
+USERNAME = os.getenv("COGNODB_USERNAME")
+PASSWORD = os.getenv("COGNODB_PASSWORD")
 
-ITERATIONS = 100
-WARMUP_RUNS = 10
-RANDOM_SEED = 42
+BENCHMARK_NODE = int(
+    os.getenv("BENCHMARK_NODE", "1891")
+)
 
 
 # ============================================================
-# PROJECT PATHS
+# VALIDATE ENVIRONMENT VARIABLES
 # ============================================================
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if not URI:
+    raise RuntimeError(
+        "Missing COGNODB_URI in .env"
+    )
 
-NODES_FILE = (
-    PROJECT_ROOT
-    / "data"
-    / "benchmark"
-    / "nodes.csv"
-)
+if not USERNAME:
+    raise RuntimeError(
+        "Missing COGNODB_USERNAME in .env"
+    )
 
-RESULTS_DIR = (
-    PROJECT_ROOT
-    / "results"
-)
-
-RESULTS_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
-
-OUTPUT_FILE = (
-    RESULTS_DIR
-    / "cognodb_final_read_benchmark.csv"
-)
+if not PASSWORD:
+    raise RuntimeError(
+        "Missing COGNODB_PASSWORD in .env"
+    )
 
 
 # ============================================================
@@ -55,20 +50,17 @@ OUTPUT_FILE = (
 
 QUERIES = {
 
-    # --------------------------------------------------------
-    # 1-HOP
-    # --------------------------------------------------------
+    "indexed_lookup": """
+        MATCH (u:User {id: $node_id})
+        RETURN u.id, u.gender, u.age
+    """,
 
     "1_hop": """
         MATCH (u:User {id: $node_id})
               -[:FRIEND]->
               (friend)
-        RETURN friend.id AS id
+        RETURN friend.id
     """,
-
-    # --------------------------------------------------------
-    # 2-HOP
-    # --------------------------------------------------------
 
     "2_hop": """
         MATCH (u:User {id: $node_id})
@@ -76,12 +68,8 @@ QUERIES = {
               (f1)
               -[:FRIEND]->
               (f2)
-        RETURN DISTINCT f2.id AS id
+        RETURN DISTINCT f2.id
     """,
-
-    # --------------------------------------------------------
-    # 3-HOP
-    # --------------------------------------------------------
 
     "3_hop": """
         MATCH (u:User {id: $node_id})
@@ -91,556 +79,61 @@ QUERIES = {
               (f2)
               -[:FRIEND]->
               (f3)
-        RETURN DISTINCT f3.id AS id
-    """,
-
-    # --------------------------------------------------------
-    # POINT LOOKUP
-    # --------------------------------------------------------
-
-    "point_lookup": """
-        MATCH (u:User {id: $node_id})
-        RETURN u.id AS id
-    """,
-
-    # --------------------------------------------------------
-    # INDEXED LOOKUP
-    # --------------------------------------------------------
-
-    "indexed_lookup": """
-        MATCH (u:User {id: $node_id})
-        RETURN
-            u.id AS id,
-            u.gender AS gender,
-            u.age AS age
-    """,
-
-    # --------------------------------------------------------
-    # AGGREGATION
-    # --------------------------------------------------------
-
-    "aggregation": """
-        MATCH (u:User)
-        RETURN
-            u.gender AS gender,
-            count(*) AS total
-        ORDER BY gender
+        RETURN DISTINCT f3.id
     """
 }
 
 
 # ============================================================
-# PERCENTILE FUNCTION
+# EXPLAIN ONE QUERY
 # ============================================================
 
-def percentile(values, p):
-
-    values = sorted(values)
-
-    if not values:
-        return 0.0
-
-    position = (
-        (len(values) - 1)
-        * p
-        / 100
-    )
-
-    lower = int(position)
-
-    upper = min(
-        lower + 1,
-        len(values) - 1
-    )
-
-    fraction = position - lower
-
-    return (
-        values[lower]
-        +
-        (
-            values[upper]
-            -
-            values[lower]
-        )
-        * fraction
-    )
-
-
-# ============================================================
-# LOAD RANDOM NODE IDS FROM LOCAL CSV
-# ============================================================
-
-def get_random_nodes():
-
-    print()
-    print(
-        "Reading node IDs from:"
-    )
-    print(NODES_FILE)
-
-    if not NODES_FILE.exists():
-
-        raise FileNotFoundError(
-            f"\nNodes file not found:\n"
-            f"{NODES_FILE}"
-        )
-
-    node_ids = []
-
-    with open(
-        NODES_FILE,
-        "r",
-        encoding="utf-8"
-    ) as file:
-
-        # Skip CSV header
-        header = next(file).strip()
-
-        print(
-            f"CSV header: {header}"
-        )
-
-        for line in file:
-
-            line = line.strip()
-
-            if not line:
-                continue
-
-            # nodes.csv:
-            # node_id,gender,age
-
-            parts = line.split(",")
-
-            if len(parts) < 1:
-                continue
-
-            try:
-
-                node_id = int(
-                    parts[0]
-                )
-
-                node_ids.append(
-                    node_id
-                )
-
-            except ValueError:
-
-                continue
-
-    if len(node_ids) < ITERATIONS:
-
-        raise RuntimeError(
-            f"Only {len(node_ids)} valid "
-            f"nodes found. Need at least "
-            f"{ITERATIONS}."
-        )
-
-    # Reproducible random selection
-    random.seed(
-        RANDOM_SEED
-    )
-
-    selected_nodes = random.sample(
-        node_ids,
-        ITERATIONS
-    )
-
-    print()
-    print(
-        f"Total available nodes : "
-        f"{len(node_ids):,}"
-    )
-
-    print(
-        f"Random benchmark nodes : "
-        f"{len(selected_nodes):,}"
-    )
-
-    print(
-        f"Random seed            : "
-        f"{RANDOM_SEED}"
-    )
-
-    return selected_nodes
-
-
-# ============================================================
-# EXECUTE QUERY
-# ============================================================
-
-def execute_query(
-    driver,
+def explain_query(
+    session,
+    query_name,
     query,
-    node_id=None
+    node_id
 ):
 
-    start_time = (
-        time.perf_counter()
+    print("\n")
+    print("=" * 70)
+    print(f"QUERY PLAN: {query_name}")
+    print("=" * 70)
+
+    explain_query_text = (
+        "EXPLAIN " + query
     )
 
-    with driver.session() as session:
+    try:
 
-        if node_id is None:
-
-            result = session.run(
-                query
-            )
-
-        else:
-
-            result = session.run(
-                query,
-                node_id=node_id
-            )
-
-        records = list(result)
-
-    end_time = (
-        time.perf_counter()
-    )
-
-    elapsed_ms = (
-        end_time
-        - start_time
-    ) * 1000
-
-    return (
-        elapsed_ms,
-        len(records)
-    )
-
-
-# ============================================================
-# BENCHMARK NORMAL QUERY
-# ============================================================
-
-def benchmark_query(
-    driver,
-    workload,
-    query,
-    node_ids
-):
-
-    print()
-    print("=" * 60)
-    print(
-        f"WORKLOAD: {workload}"
-    )
-    print("=" * 60)
-
-    # --------------------------------------------------------
-    # WARM-UP
-    # --------------------------------------------------------
-
-    print(
-        f"Warm-up runs: "
-        f"{WARMUP_RUNS}"
-    )
-
-    for i in range(
-        WARMUP_RUNS
-    ):
-
-        node_id = node_ids[
-            i % len(node_ids)
-        ]
-
-        execute_query(
-            driver,
-            query,
-            node_id
+        result = session.run(
+            explain_query_text,
+            node_id=node_id
         )
 
-    # --------------------------------------------------------
-    # ACTUAL BENCHMARK
-    # --------------------------------------------------------
+        summary = result.consume()
 
-    print(
-        f"Benchmark runs: "
-        f"{ITERATIONS}"
-    )
+        plan = summary.plan
 
-    latencies = []
-    row_counts = []
-
-    for i in range(
-        ITERATIONS
-    ):
-
-        node_id = node_ids[i]
-
-        latency_ms, rows = (
-            execute_query(
-                driver,
-                query,
-                node_id
-            )
-        )
-
-        latencies.append(
-            latency_ms
-        )
-
-        row_counts.append(
-            rows
-        )
-
-        if (
-            (i + 1) % 10 == 0
-        ):
+        if plan is None:
 
             print(
-                f"Completed "
-                f"{i + 1}/{ITERATIONS}"
+                "\nNo execution plan returned."
             )
 
-    # --------------------------------------------------------
-    # STATISTICS
-    # --------------------------------------------------------
+            return
 
-    result = {
+        print("\nExecution Plan:")
+        print("-" * 70)
 
-        "workload":
-            workload,
+        print(plan)
 
-        "iterations":
-            ITERATIONS,
+    except Exception as e:
 
-        "warmup_runs":
-            WARMUP_RUNS,
-
-        "min_ms":
-            min(latencies),
-
-        "max_ms":
-            max(latencies),
-
-        "mean_ms":
-            statistics.mean(
-                latencies
-            ),
-
-        "p50_ms":
-            percentile(
-                latencies,
-                50
-            ),
-
-        "p95_ms":
-            percentile(
-                latencies,
-                95
-            ),
-
-        "avg_result_rows":
-            statistics.mean(
-                row_counts
-            )
-    }
-
-    return result
-
-
-# ============================================================
-# AGGREGATION BENCHMARK
-# ============================================================
-
-def benchmark_aggregation(
-    driver
-):
-
-    print()
-    print("=" * 60)
-    print(
-        "WORKLOAD: aggregation"
-    )
-    print("=" * 60)
-
-    query = QUERIES[
-        "aggregation"
-    ]
-
-    # --------------------------------------------------------
-    # WARM-UP
-    # --------------------------------------------------------
-
-    print(
-        f"Warm-up runs: "
-        f"{WARMUP_RUNS}"
-    )
-
-    for _ in range(
-        WARMUP_RUNS
-    ):
-
-        execute_query(
-            driver,
-            query
-        )
-
-    # --------------------------------------------------------
-    # ACTUAL BENCHMARK
-    # --------------------------------------------------------
-
-    print(
-        f"Benchmark runs: "
-        f"{ITERATIONS}"
-    )
-
-    latencies = []
-    row_counts = []
-
-    for i in range(
-        ITERATIONS
-    ):
-
-        latency_ms, rows = (
-            execute_query(
-                driver,
-                query
-            )
-        )
-
-        latencies.append(
-            latency_ms
-        )
-
-        row_counts.append(
-            rows
-        )
-
-        if (
-            (i + 1) % 10 == 0
-        ):
-
-            print(
-                f"Completed "
-                f"{i + 1}/{ITERATIONS}"
-            )
-
-    return {
-
-        "workload":
-            "aggregation",
-
-        "iterations":
-            ITERATIONS,
-
-        "warmup_runs":
-            WARMUP_RUNS,
-
-        "min_ms":
-            min(latencies),
-
-        "max_ms":
-            max(latencies),
-
-        "mean_ms":
-            statistics.mean(
-                latencies
-            ),
-
-        "p50_ms":
-            percentile(
-                latencies,
-                50
-            ),
-
-        "p95_ms":
-            percentile(
-                latencies,
-                95
-            ),
-
-        "avg_result_rows":
-            statistics.mean(
-                row_counts
-            )
-    }
-
-
-# ============================================================
-# SAVE RESULTS
-# ============================================================
-
-def save_results(
-    results
-):
-
-    fieldnames = [
-
-        "workload",
-
-        "iterations",
-
-        "warmup_runs",
-
-        "min_ms",
-
-        "max_ms",
-
-        "mean_ms",
-
-        "p50_ms",
-
-        "p95_ms",
-
-        "avg_result_rows"
-    ]
-
-    with open(
-        OUTPUT_FILE,
-        "w",
-        newline="",
-        encoding="utf-8"
-    ) as file:
-
-        writer = csv.DictWriter(
-            file,
-            fieldnames=fieldnames
-        )
-
-        writer.writeheader()
-
-        writer.writerows(
-            results
-        )
-
-
-# ============================================================
-# PRINT SUMMARY
-# ============================================================
-
-def print_summary(
-    results
-):
-
-    print()
-    print("=" * 75)
-    print(
-        "FINAL READ BENCHMARK SUMMARY"
-    )
-    print("=" * 75)
-
-    print(
-        f"{'Workload':<22}"
-        f"{'p50(ms)':>12}"
-        f"{'p95(ms)':>12}"
-        f"{'Mean(ms)':>14}"
-    )
-
-    print("-" * 60)
-
-    for result in results:
+        print("\nQuery plan analysis failed.")
 
         print(
-            f"{result['workload']:<22}"
-            f"{result['p50_ms']:>12.3f}"
-            f"{result['p95_ms']:>12.3f}"
-            f"{result['mean_ms']:>14.3f}"
+            f"\nError: {e}"
         )
 
 
@@ -650,15 +143,19 @@ def print_summary(
 
 def main():
 
-    print("=" * 60)
-    print(
-        "WEXA AI - FINAL COGNODB READ BENCHMARK"
-    )
-    print("=" * 60)
+    print("=" * 70)
+    print("WEXA AI - COGNODB QUERY PLAN ANALYSIS")
+    print("=" * 70)
 
-    # --------------------------------------------------------
-    # CREATE DRIVER
-    # --------------------------------------------------------
+    print(
+        f"\nBenchmark node: "
+        f"{BENCHMARK_NODE}"
+    )
+
+    print(
+        f"Connecting to: "
+        f"{URI}"
+    )
 
     driver = GraphDatabase.driver(
         URI,
@@ -671,135 +168,81 @@ def main():
     try:
 
         # ----------------------------------------------------
-        # TEST CONNECTION
+        # Verify connection
         # ----------------------------------------------------
 
         driver.verify_connectivity()
 
-        print()
         print(
-            "CognoDB connection: OK"
-        )
-
-        print(
-            f"Iterations: "
-            f"{ITERATIONS}"
-        )
-
-        print(
-            f"Warm-up: "
-            f"{WARMUP_RUNS}"
+            "\nCognoDB connection: OK"
         )
 
         # ----------------------------------------------------
-        # SELECT RANDOM NODES LOCALLY
+        # Open session
         # ----------------------------------------------------
 
-        print()
-        print(
-            "Selecting random benchmark nodes..."
-        )
+        with driver.session() as session:
 
-        # IMPORTANT:
-        # No driver argument here.
-        #
-        # This fixes:
-        #
-        # TypeError:
-        # get_random_nodes() takes 0 positional
-        # arguments but 1 was given
+            # ------------------------------------------------
+            # Verify benchmark node
+            # ------------------------------------------------
 
-        node_ids = (
-            get_random_nodes()
-        )
-
-        # ----------------------------------------------------
-        # RUN BENCHMARKS
-        # ----------------------------------------------------
-
-        results = []
-
-        workloads = [
-
-            "1_hop",
-
-            "2_hop",
-
-            "3_hop",
-
-            "point_lookup",
-
-            "indexed_lookup"
-        ]
-
-        for workload in workloads:
-
-            result = benchmark_query(
-
-                driver,
-
-                workload,
-
-                QUERIES[
-                    workload
-                ],
-
-                node_ids
+            result = session.run(
+                """
+                MATCH (u:User {id: $node_id})
+                RETURN u.id AS id
+                """,
+                node_id=BENCHMARK_NODE
             )
 
-            results.append(
-                result
+            record = result.single()
+
+            if record is None:
+
+                raise RuntimeError(
+                    f"Benchmark node "
+                    f"{BENCHMARK_NODE} "
+                    f"was not found in CognoDB."
+                )
+
+            print(
+                f"Benchmark node {BENCHMARK_NODE}: FOUND"
             )
 
-        # ----------------------------------------------------
-        # AGGREGATION
-        # ----------------------------------------------------
+            # ------------------------------------------------
+            # Explain all queries
+            # ------------------------------------------------
 
-        aggregation_result = (
-            benchmark_aggregation(
-                driver
-            )
-        )
+            for query_name, query in QUERIES.items():
 
-        results.append(
-            aggregation_result
-        )
+                explain_query(
+                    session,
+                    query_name,
+                    query,
+                    BENCHMARK_NODE
+                )
 
-        # ----------------------------------------------------
-        # SAVE
-        # ----------------------------------------------------
-
-        save_results(
-            results
-        )
-
-        # ----------------------------------------------------
-        # SUMMARY
-        # ----------------------------------------------------
-
-        print_summary(
-            results
-        )
-
-        # ----------------------------------------------------
-        # OUTPUT LOCATION
-        # ----------------------------------------------------
-
-        print()
-        print(
-            "Results saved to:"
-        )
+        print("\n" + "=" * 70)
 
         print(
-            OUTPUT_FILE
+            "QUERY PLAN ANALYSIS COMPLETE"
         )
 
-        print()
-        print("=" * 60)
+        print("=" * 70)
+
+    except Exception as e:
+
+        print("\n" + "=" * 70)
+
         print(
-            "FINAL READ BENCHMARK COMPLETE"
+            "COGNODB QUERY PLAN ANALYSIS FAILED"
         )
-        print("=" * 60)
+
+        print("=" * 70)
+
+        print(
+            f"\nError: {e}"
+        )
 
     finally:
 
